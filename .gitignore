@@ -1,0 +1,11 @@
+# Ignore tensorboard logs and other generated files
+_tensorboard_logs/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv
+.idea/
+.vscode/
+.DS_Store
