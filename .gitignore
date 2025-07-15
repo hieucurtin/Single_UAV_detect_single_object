@@ -1,11 +1,23 @@
-# Ignore tensorboard logs and other generated files
+# TensorFlow and TensorBoard logs
 _tensorboard_logs/
+*.tfevents.*
+
+# Output directories for figures
+_out/
+
+# TensorFlow model checkpoints and saved models
+*.ckpt
+*.h5
+*.pb
+saved_model/
+checkpoints/
+
+# Python cache files
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.env
-.venv
-.idea/
-.vscode/
-.DS_Store
+
+# Temporary files
+*.log
+*.tmp

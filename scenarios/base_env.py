@@ -84,7 +84,7 @@ class BaseUAVEnv(gym.Env):
     def _place_object(self):
         """Place object in environment. Override in derived classes for different scenarios."""
         angle = np.random.uniform(0, 2 * np.pi)
-        distance = np.random.uniform(0.5, 1)
+        distance = np.random.uniform(0.6, 0.8)
         self.object_pos[0] = np.array([
             distance * np.cos(angle),
             distance * np.sin(angle)

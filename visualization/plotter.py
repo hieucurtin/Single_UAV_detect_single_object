@@ -1,41 +1,59 @@
 import os
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import shutil
+from scenarios.uav_envs import NoisyFullInfoUAVEnv, NoisyDirectionUAVEnv
 
 class UAVVisualization:
-    def plot_best_trajectory(self, paths, total_rewards, object_positions_list, rewards_list, eval_env):
+    def __init__(self, output_dir="_plots", noise_std=None):
+        self.output_dir = output_dir
+        self.noise_std = noise_std
+        os.makedirs(output_dir, exist_ok=True)
+
+    def plot_best_trajectory(self, paths, total_rewards, object_positions_list, step_rewards_list, eval_env):
         if not total_rewards:
             return
         
         max_reward_index = np.argmax(total_rewards)
         best_path = np.array(paths[max_reward_index])
         best_objects = object_positions_list[max_reward_index]
-        best_rewards = rewards_list[max_reward_index]
+        best_step_rewards = step_rewards_list[max_reward_index]
         
         plt.figure(figsize=(8, 8))
         # Plot trajectory
         plt.plot(best_path[:, 0], best_path[:, 1], 'b-', label='Best Trajectory')
         # Plot object and detection zone
+        handles, labels = [], []
         for pos in best_objects:
-            plt.plot(pos[0], pos[1], 'ro', markersize=12, label='Object')
-            circle = plt.Circle((pos[0], pos[1]), eval_env.detection_radius, color='g', alpha=0.15, label='Detection Zone')
+            obj, = plt.plot(pos[0], pos[1], 'ro', markersize=12)
+            circle = plt.Circle((pos[0], pos[1]), eval_env.detection_radius, color='g', alpha=0.15)
             plt.gca().add_artist(circle)
-        # Plot start
-        plt.plot(best_path[0, 0], best_path[0, 1], 'g^', markersize=15, label='Start')
-        # Plot step numbers
+            if 'Object' not in labels:
+                handles.append(obj)
+                labels.append('Object')
+            if 'Detection Zone' not in labels:
+                handles.append(plt.Circle((0, 0), 1, color='g', alpha=0.15))
+                labels.append('Detection Zone')
+        start, = plt.plot(best_path[0, 0], best_path[0, 1], 'g^', markersize=15, label='Start')
+        handles.append(start)
+        labels.append('Start')
         for i, pos in enumerate(best_path):
             plt.scatter(pos[0], pos[1], c='g', marker='^', alpha=0.3, s=100)
         # Highlight detection step
-        for i in range(len(best_path)):
-            if best_rewards[i] > eval_env.step_penalty:  # Detection reward received
-                plt.plot(best_path[i+1, 0], best_path[i+1, 1], 'y*', markersize=15, label='Detection Step')
+        for i in range(len(best_step_rewards)):
+            if best_step_rewards[i] >= eval_env.detection_reward:
+                detect, = plt.plot(best_path[i+1, 0], best_path[i+1, 1], 'y*', markersize=15, label='Detection Step')
+                handles.append(detect)
+                labels.append('Detection Step')
                 break
         
         plt.xlabel("X")
         plt.ylabel("Y")
-        plt.title("Best Episode Trajectory with Steps and Detection")
-        plt.legend()
+        noise_text = f" (Noise Std: {self.noise_std})" if self.noise_std is not None else ""
+        plt.title(f"Best Episode Trajectory with Steps and Detection{noise_text}")
+        plt.legend(handles, labels)
         plt.grid(True)
         plt.axis('equal')
         plt.savefig(os.path.join(self.output_dir, "best_trajectory_steps.png"))
@@ -49,7 +67,8 @@ class UAVVisualization:
         plt.plot(0.0, 0.0, 'g^', markersize=15, label='UAV Start')
         plt.xlabel("X")
         plt.ylabel("Y")
-        plt.title("All UAV Trajectories Across Evaluation Episodes")
+        noise_text = f" (Noise Std: {self.noise_std})" if self.noise_std is not None else ""
+        plt.title(f"All UAV Trajectories Across Evaluation Episodes{noise_text}")
         plt.legend()
         plt.grid(True)
         plt.axis('equal')
@@ -57,22 +76,26 @@ class UAVVisualization:
         plt.close()
 
     def plot_detection_stats(self, detected_list):
+        if not all(isinstance(x, (int, bool)) and x in (0, 1) for x in detected_list):
+            raise ValueError("detected_list must contain only 0s and 1s or booleans")
+        
         plt.figure(figsize=(8, 5))
         detected_count = sum(detected_list)
         undetected_count = len(detected_list) - detected_count
         plt.bar(['Detected', 'Not Detected'], [detected_count, undetected_count], color=['green', 'red'])
         plt.xlabel("Detection Status")
         plt.ylabel("Number of Episodes")
-        plt.title("Episodes with and without Object Detection")
+        noise_text = f" (Noise Std: {self.noise_std})" if self.noise_std is not None else ""
+        plt.title(f"Episodes with and without Object Detection{noise_text}")
         plt.savefig(os.path.join(self.output_dir, "detection_episodes.png"))
         plt.close()
 
-    def plot_steps_to_detect(self, detected_list, paths, rewards_list, eval_env):
+    def plot_steps_to_detect(self, detected_list, paths, step_rewards_list, eval_env):
         steps_to_detect = []
-        for idx, (detected, path, rewards) in enumerate(zip(detected_list, paths, rewards_list)):
+        for idx, (detected, path, step_rewards) in enumerate(zip(detected_list, paths, step_rewards_list)):
             if detected == 1:
-                for i, reward in enumerate(rewards):
-                    if reward > eval_env.step_penalty:  # Detection reward received
+                for i, reward in enumerate(step_rewards):
+                    if reward >= eval_env.step_penalty:
                         steps_to_detect.append(i + 1)
                         break
         
@@ -81,7 +104,8 @@ class UAVVisualization:
             plt.hist(steps_to_detect, bins=15, color='orange', alpha=0.7)
             plt.xlabel("Steps to Detect Object")
             plt.ylabel("Number of Episodes")
-            plt.title("Steps Required to Detect Object")
+            noise_text = f" (Noise Std: {self.noise_std})" if self.noise_std is not None else ""
+            plt.title(f"Steps Required to Detect Object{noise_text}")
             plt.grid(True)
             plt.savefig(os.path.join(self.output_dir, "steps_to_detect_object.png"))
             plt.close()
@@ -89,56 +113,44 @@ class UAVVisualization:
     def plot_policy_visualization(self, total_rewards, object_positions_list, max_reward_index, model, eval_env):
         if not total_rewards:
             return
-
         best_objects = object_positions_list[max_reward_index]
-        # if not best_objects:
-        #     print("[Visualization] Warning: No object positions found for the best episode. Skipping policy visualization.")
-        #     return
-
         x = np.linspace(-1, 1, 25)
         y = np.linspace(-1, 1, 25)
         X, Y = np.meshgrid(x, y)
         U, V = np.zeros_like(X), np.zeros_like(Y)
-
-        # Policy before detection (using angle)
         for i in range(X.shape[0]):
             for j in range(X.shape[1]):
-                rel_pos = best_objects[0] - np.array([X[i, j], Y[i, j]])
-                dist = np.linalg.norm(rel_pos)
-                angle = np.arctan2(rel_pos[1], rel_pos[0]) if dist > 1e-6 else 0.0
-                obs = np.array([X[i, j], Y[i, j], np.sin(angle), np.cos(angle), 0], dtype=np.float32)
+                if isinstance(eval_env, NoisyDirectionUAVEnv):
+                    rel_pos = best_objects[0] - np.array([X[i, j], Y[i, j]])
+                    dist = np.linalg.norm(rel_pos)
+                    angle = np.arctan2(rel_pos[1], rel_pos[0]) if dist > 1e-6 else 0.0
+                    obs = np.array([X[i, j], Y[i, j], np.sin(angle), np.cos(angle)], dtype=np.float32)
+                    noise = np.random.normal(0, eval_env.noise_std, obs.shape)
+                    obs = obs + noise
+                    direction = obs[2:4]
+                    norm = np.linalg.norm(direction)
+                    if norm > 1e-6:
+                        obs[2:4] = direction / norm
+                elif isinstance(eval_env, NoisyFullInfoUAVEnv):
+                    obs = np.array([X[i, j], Y[i, j], best_objects[0][0], best_objects[0][1]], dtype=np.float32)
+                    noise = np.random.normal(0, eval_env.noise_std, obs.shape)
+                    obs = np.clip(obs + noise, -1.0, 1.0)  # Apply clipping
+                else:
+                    raise ValueError("Unsupported environment type for policy visualization")
                 action, _ = model.predict(obs, deterministic=True)
                 v_next = (1 - eval_env.damping) * np.array([0, 0]) + action * eval_env.max_speed
                 U[i, j], V[i, j] = v_next
-
         plt.figure(figsize=(9, 9))
         plt.quiver(X, Y, U, V, scale=None, scale_units='xy', width=0.003)
-        plt.title("Policy Vector Field - BEFORE Target is Detected (Angle)")
-        plt.xlabel("X")
-        plt.ylabel("Y")
-        plt.axis('equal')
-        plt.grid(True)
-        plt.savefig(os.path.join(self.output_dir, "uav_policy_undetected.png"))
-        plt.close()
-
-        # Policy after detection (using object position)
-        for i in range(X.shape[0]):
-            for j in range(X.shape[1]):
-                obs = np.array([X[i, j], Y[i, j], best_objects[0][0], best_objects[0][1], 1], dtype=np.float32)
-                action, _ = model.predict(obs, deterministic=True)
-                v_next = (1 - eval_env.damping) * np.array([0, 0]) + action * eval_env.max_speed
-                U[i, j], V[i, j] = v_next
-
-        plt.figure(figsize=(9, 9))
-        plt.quiver(X, Y, U, V, scale=None, scale_units='xy', width=0.003, color='tab:orange')
         plt.plot(best_objects[0][0], best_objects[0][1], 'ro', markersize=10, label='Object')
         plt.legend()
-        plt.title("Policy Vector Field - AFTER Target is Detected (Position)")
+        noise_text = f" (Noise Std: {self.noise_std})" if self.noise_std is not None else ""
+        plt.title(f"Policy Vector Field{noise_text}")
         plt.xlabel("X")
         plt.ylabel("Y")
         plt.axis('equal')
         plt.grid(True)
-        plt.savefig(os.path.join(self.output_dir, "uav_policy_detected.png"))
+        plt.savefig(os.path.join(self.output_dir, f"uav_policy_noise_{self.noise_std}.png"))
         plt.close()
 
     def move_figures_to_tensorboard(self, model):
@@ -147,9 +159,10 @@ class UAVVisualization:
         if os.path.exists(self.output_dir):
             os.makedirs(dst_dir, exist_ok=True)
             for filename in os.listdir(self.output_dir):
-                src_file = os.path.join(self.output_dir, filename)
-                dst_file = os.path.join(dst_dir, filename)
-                shutil.move(src_file, dst_file)
+                if filename.endswith('.png'):  # Chỉ di chuyển file .png
+                    src_file = os.path.join(self.output_dir, filename)
+                    dst_file = os.path.join(dst_dir, filename)
+                    shutil.move(src_file, dst_file)
             print(f"All figures have been moved to TensorBoard log folder: {tb_run_dir}")
         else:
             print("No figures found to move.")
@@ -169,7 +182,10 @@ class ComparisonVisualizer:
             results_dict: Dictionary with structure {scenario: {algorithm: metrics}}
         """
         scenarios = list(results_dict.keys())
-        algorithms = list(results_dict[scenarios[0]].keys())
+        algorithms = list(results_dict[scenarios[0]].keys()) if scenarios else []
+        
+        if not algorithms or not scenarios:
+            raise ValueError(f"Cannot generate performance comparison plot: empty scenarios or algorithms (scenarios={scenarios}, algorithms={algorithms})")
         
         # Create subplots for different metrics
         fig, axes = plt.subplots(2, 2, figsize=(15, 12))
@@ -216,7 +232,10 @@ class ComparisonVisualizer:
     def plot_reward_distribution(self, results_dict):
         """Plot reward distribution comparison."""
         scenarios = list(results_dict.keys())
-        algorithms = list(results_dict[scenarios[0]].keys())
+        algorithms = list(results_dict[scenarios[0]].keys()) if scenarios else []
+        
+        if not algorithms or not scenarios:
+            raise ValueError(f"Cannot generate reward distribution plot: empty scenarios or algorithms (scenarios={scenarios}, algorithms={algorithms})")
         
         fig, axes = plt.subplots(len(scenarios), len(algorithms), 
                                 figsize=(6 * len(algorithms), 4 * len(scenarios)))
@@ -245,7 +264,10 @@ class ComparisonVisualizer:
     def plot_detection_time_analysis(self, results_dict):
         """Plot detection time analysis."""
         scenarios = list(results_dict.keys())
-        algorithms = list(results_dict[scenarios[0]].keys())
+        algorithms = list(results_dict[scenarios[0]].keys()) if scenarios else []
+        
+        if not algorithms or not scenarios:
+            raise ValueError(f"Cannot generate detection time analysis plot: empty scenarios or algorithms (scenarios={scenarios}, algorithms={algorithms})")
         
         fig, axes = plt.subplots(1, 2, figsize=(15, 6))
         
@@ -305,7 +327,10 @@ class ComparisonVisualizer:
     def plot_trajectory_heatmap(self, results_dict):
         """Plot trajectory heatmap for each scenario-algorithm combination."""
         scenarios = list(results_dict.keys())
-        algorithms = list(results_dict[scenarios[0]].keys())
+        algorithms = list(results_dict[scenarios[0]].keys()) if scenarios else []
+        
+        if not algorithms or not scenarios:
+            raise ValueError(f"Cannot generate trajectory heatmap plot: empty scenarios or algorithms (scenarios={scenarios}, algorithms={algorithms})")
         
         fig, axes = plt.subplots(len(scenarios), len(algorithms), 
                                 figsize=(6 * len(algorithms), 6 * len(scenarios)))
@@ -349,7 +374,10 @@ class ComparisonVisualizer:
     def create_summary_report(self, results_dict):
         """Create a summary report of all metrics."""
         scenarios = list(results_dict.keys())
-        algorithms = list(results_dict[scenarios[0]].keys())
+        algorithms = list(results_dict[scenarios[0]].keys()) if scenarios else []
+        
+        if not algorithms or not scenarios:
+            raise ValueError(f"Cannot generate summary report: empty scenarios or algorithms (scenarios={scenarios}, algorithms={algorithms})")
         
         # Create summary table
         summary_data = []
@@ -393,24 +421,45 @@ class ComparisonVisualizer:
                    dpi=300, bbox_inches='tight')
         plt.close()
     
-    def generate_all_comparisons(self, results_dict):
-        """Generate all comparison visualizations."""
-        print("Generating performance comparison plots...")
-        self.plot_performance_comparison(results_dict)
+    def generate_all_comparisons(self, results_dict, noise_category, single_algo=False):
+            """Generate comparison plots for all metrics across scenarios."""
+            plt.figure(figsize=(15, 10))
+            axes = plt.subplots(2, 2, figsize=(15, 10))[1]  # Create 2x2 grid of subplots
+            
+            scenarios = list(results_dict.keys())
+            algorithms = ["PPO"] if single_algo else list({algo for scenario in results_dict.values() for algo in scenario.keys() if isinstance(scenario, dict)})
+            
+            self.plot_performance_comparison(results_dict, axes, scenarios, algorithms, single_algo)
+            plt.tight_layout()
+            plt.savefig(os.path.join(self.output_dir, f"{noise_category}_comparison.png"))
+            plt.close()
+
+    def plot_performance_comparison(self, results_dict, axes, scenarios, algorithms, single_algo=False):
+        """Plot comparison of performance metrics across scenarios and algorithms."""
+        metrics = ['success_rate', 'avg_reward', 'avg_steps_to_detect']
         
-        print("Generating reward distribution plots...")
-        self.plot_reward_distribution(results_dict)
+        for idx, metric in enumerate(metrics):
+            ax = axes[0, idx] if idx < 2 else axes[1, 0]  # Adjust layout for 2x2 grid
+            self._plot_metric_comparison(ax, results_dict, metric, 'Success Rate' if metric == 'success_rate' else 
+                                        'Average Reward' if metric == 'avg_reward' else 'Average Steps to Detect', 
+                                        scenarios, algorithms, single_algo)
+
+    def _plot_metric_comparison(self, ax, results_dict, metric_name, title, scenarios, algorithms, single_algo=False):
+        """Plot a single metric comparison across scenarios and algorithms."""
+        if single_algo:
+            values = [results_dict[scenario][metric_name] for scenario in scenarios]
+            ax.bar(scenarios, values, color=['blue', 'orange', 'green'])
+            ax.set_title(f'{title} (Single Algorithm: PPO)')
+        else:
+            for algo in algorithms:
+                values = [results_dict[scenario][algo][metric_name] for scenario in scenarios if algo in results_dict[scenario]]
+                ax.plot(scenarios, values, marker='o', label=algo)
+            ax.set_title(title)
+            ax.legend()
         
-        print("Generating detection time analysis...")
-        self.plot_detection_time_analysis(results_dict)
-        
-        print("Generating trajectory heatmaps...")
-        self.plot_trajectory_heatmap(results_dict)
-        
-        print("Generating summary report...")
-        self.create_summary_report(results_dict)
-        
-        print(f"All comparison plots saved to {self.output_dir}")
+        ax.set_xlabel('Scenarios')
+        ax.set_ylabel(title)
+        ax.grid(True)
 
     def move_figures_to_tensorboard(self, model):
         """
