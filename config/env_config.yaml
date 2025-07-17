@@ -1,0 +1,15 @@
+environment:
+  # Base environment parameters
+  num_objects: 1
+  detection_radius: 5.0
+  tracking_reward: 0.0
+  detection_reward: 5.0
+  step_penalty: -0.005
+  distance_reward_scale: 0.0
+  out_bounds_penalty: -0.1
+  max_speed: 0.5
+  damping: 0.2
+  action_space:
+    type: "Box"
+    low: [-50.0, -50.0]
+    high: [50.0, 50.0]

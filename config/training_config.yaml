@@ -1,0 +1,21 @@
+training:
+  # Training configuration
+  max_steps: 20
+  total_timesteps: 2000000
+  eval_episodes: 100
+  
+  # Noise levels (standard deviation) for different scenarios
+  noise_levels:
+    noise_low: 0.1    # Reduced from original values
+    noise_medium: 0.2
+    noise_high: 0.35
+  
+  # Available scenario types
+  scenarios:
+    - full_info_noise
+    - direction_noise
+
+  # Tensorboard logging
+  tensorboard:
+    log_dir: "_tensorboard_logs"
+    run_name: null  # Will be auto-generated if null

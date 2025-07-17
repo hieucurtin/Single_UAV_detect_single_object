@@ -2,6 +2,7 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import pygame
+from utils.config_loader import load_config
 
 class BaseUAVEnv(gym.Env):
     """Base class for UAV object tracking environments."""
@@ -9,15 +10,18 @@ class BaseUAVEnv(gym.Env):
 
     def __init__(self, max_steps=100, render_mode=None):
         super().__init__()
+        # Load environment configuration
+        env_config = load_config('env_config')['environment']
+        
         self.max_steps = max_steps
         self.render_mode = render_mode
-        self.num_objects = 1
-        self.detection_radius = 0.1
-        self.tracking_reward = 0.0
-        self.detection_reward = 5.0
-        self.step_penalty = -0.005
-        self.distance_reward_scale = 0
-        self.out_bounds_penalty = -0.1
+        self.num_objects = env_config['num_objects']
+        self.detection_radius = env_config['detection_radius']
+        self.tracking_reward = env_config['tracking_reward']
+        self.detection_reward = env_config['detection_reward']
+        self.step_penalty = env_config['step_penalty']
+        self.distance_reward_scale = env_config['distance_reward_scale']
+        self.out_bounds_penalty = env_config['out_bounds_penalty']
         self.step_count = 0
         self.detected = {"object_0": False}
         self.episode_reward = 0.0
@@ -26,11 +30,15 @@ class BaseUAVEnv(gym.Env):
         self.uav_pos = np.zeros(2, dtype=np.float32)
         self.uav_vel = np.zeros(2, dtype=np.float32)
         self.object_pos = [np.zeros(2, dtype=np.float32)]
-        self.max_speed = 0.02
-        self.damping = 0.05
+        self.max_speed = env_config['max_speed']
+        self.damping = env_config['damping']
 
-        # Action space: 2D velocity (x, y) in [-1, 1]
-        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
+        # Action space from config
+        action_config = env_config['action_space']
+        self.action_space = spaces.Box(
+            low=np.array(action_config['low'], dtype=np.float32),
+            high=np.array(action_config['high'], dtype=np.float32)
+        )
 
         # Rendering setup
         self.screen = None

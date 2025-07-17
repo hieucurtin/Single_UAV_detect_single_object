@@ -1,0 +1,22 @@
+# Available algorithms and their parameters
+algorithms:
+  - PPO
+  - SAC  # Commented out in current code but keeping for future use
+
+algorithm_params:
+  PPO:
+    n_steps: 2048
+    batch_size: 512
+    ent_coef: 0.01
+    gamma: 0.99
+    learning_rate: 0.0005
+    policy: "MlpPolicy"
+    device: "auto"
+    verbose: 1
+  
+  SAC:
+    batch_size: 256
+    ent_coef: "auto"
+    policy: "MlpPolicy"
+    device: "auto"
+    verbose: 1
