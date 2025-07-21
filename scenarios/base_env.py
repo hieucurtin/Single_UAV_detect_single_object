@@ -26,6 +26,10 @@ class BaseUAVEnv(gym.Env):
         self.detected = {"object_0": False}
         self.episode_reward = 0.0
 
+        # Load map bounds from config
+        self.map_bounds_low = np.array(env_config['map_bounds']['low'], dtype=np.float32)
+        self.map_bounds_high = np.array(env_config['map_bounds']['high'], dtype=np.float32)
+
         # UAV and object properties
         self.uav_pos = np.zeros(2, dtype=np.float32)
         self.uav_vel = np.zeros(2, dtype=np.float32)
@@ -50,9 +54,14 @@ class BaseUAVEnv(gym.Env):
     def update_uav_state(self, action):
         """Update UAV position and velocity based on action."""
         action = np.clip(action, -1.0, 1.0).astype(np.float32)
+        # Update velocity with damping and action contribution
         self.uav_vel = (1 - self.damping) * self.uav_vel + action * self.max_speed
+        # Normalize velocity to enforce max_speed
+        vel_norm = np.linalg.norm(self.uav_vel)
+        if vel_norm > self.max_speed:
+            self.uav_vel = self.uav_vel / vel_norm * self.max_speed
         self.uav_pos += self.uav_vel
-        self.uav_pos = np.clip(self.uav_pos, -1.0, 1.0)
+        self.uav_pos = np.clip(self.uav_pos, self.map_bounds_low, self.map_bounds_high)
         self.uav_path.append(self.uav_pos.copy())
 
     def compute_reward_cust(self):
@@ -67,7 +76,8 @@ class BaseUAVEnv(gym.Env):
                 self.detected["object_0"] = True
             reward += self.tracking_reward
 
-        if abs(self.uav_pos[0]) > 0.9 or abs(self.uav_pos[1]) > 0.9:
+        if (abs(self.uav_pos[0]) > (self.map_bounds_high[0]*0.8) or 
+            abs(self.uav_pos[1]) > (self.map_bounds_high[1]*0.8)):
             reward += self.out_bounds_penalty
 
         return float(reward)
@@ -92,7 +102,8 @@ class BaseUAVEnv(gym.Env):
     def _place_object(self):
         """Place object in environment. Override in derived classes for different scenarios."""
         angle = np.random.uniform(0, 2 * np.pi)
-        distance = np.random.uniform(0.6, 0.8)
+        # Scale distance to map size, keeping object within 50-80% of map bounds
+        distance = np.random.uniform(0.5 * self.map_bounds_high[0], 0.8 * self.map_bounds_high[0])
         self.object_pos[0] = np.array([
             distance * np.cos(angle),
             distance * np.sin(angle)
@@ -108,7 +119,7 @@ class BaseUAVEnv(gym.Env):
 
         obs = self._get_obs()
         terminated = False
-        truncated = self.step_count >= self.max_steps
+        truncated = self.step_count >= self.max_steps or self.detected["object_0"]
         info = {
             "detected_count": sum(self.detected.values()),
             "uav_path": self.uav_path.copy()
@@ -143,16 +154,20 @@ class BaseUAVEnv(gym.Env):
 
         self.screen.fill((255, 255, 255))
 
-        # Convert coordinates from [-1,1] to screen coordinates
+        # Convert coordinates from map_bounds to screen coordinates
         def to_screen(pos):
+            # Normalize position to [0, 1] based on map bounds
+            norm_x = (pos[0] - self.map_bounds_low[0]) / (self.map_bounds_high[0] - self.map_bounds_low[0])
+            norm_y = (pos[1] - self.map_bounds_low[1]) / (self.map_bounds_high[1] - self.map_bounds_low[1])
             return (
-                int((pos[0] + 1) * self.screen_size / 2),
-                int((pos[1] + 1) * self.screen_size / 2)
+                int(norm_x * self.screen_size),
+                int(norm_y * self.screen_size)
             )
 
         # Draw detection radius
         center = to_screen(self.uav_pos)
-        radius = int(self.detection_radius * self.screen_size / 2)
+        # Scale radius based on map size
+        radius = int(self.detection_radius * self.screen_size / (self.map_bounds_high[0] - self.map_bounds_low[0]))
         pygame.draw.circle(self.screen, (200, 200, 200), center, radius)
 
         # Draw UAV path

@@ -5,11 +5,16 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import shutil
 from scenarios.uav_envs import NoisyFullInfoUAVEnv, NoisyDirectionUAVEnv
+from utils.config_loader import load_config
 
 class UAVVisualization:
     def __init__(self, output_dir="_plots", noise_std=None):
         self.output_dir = output_dir
-        self.noise_std = noise_std
+        self.noise_std = noise_std  # Tuple of (position_noise_std, bearing_noise_std) or single noise_std
+        # Load map bounds from config
+        env_config = load_config('env_config')['environment']
+        self.map_bounds_low = np.array(env_config['map_bounds']['low'], dtype=np.float32)
+        self.map_bounds_high = np.array(env_config['map_bounds']['high'], dtype=np.float32)
         os.makedirs(output_dir, exist_ok=True)
 
     def plot_best_trajectory(self, paths, total_rewards, object_positions_list, step_rewards_list, eval_env):
@@ -21,9 +26,18 @@ class UAVVisualization:
         best_objects = object_positions_list[max_reward_index]
         best_step_rewards = step_rewards_list[max_reward_index]
         
+        # Compute noisy observations for the best trajectory
+        noisy_path = []
+        eval_env.reset()  # Convert seed to Python int
+        for pos in best_path:
+            eval_env.uav_pos = pos.copy()  # Set UAV position to replay trajectory
+            noisy_obs = eval_env._get_obs()  # Get noisy observation
+            noisy_path.append(noisy_obs[:2])  # Store noisy UAV position (first two components)
+        noisy_path = np.array(noisy_path)
+        
         plt.figure(figsize=(8, 8))
-        # Plot trajectory
-        plt.plot(best_path[:, 0], best_path[:, 1], 'b-', label='Best Trajectory')
+        # Plot true trajectory
+        plt.plot(best_path[:, 0], best_path[:, 1], 'b-', label='True Trajectory')
         # Plot object and detection zone
         handles, labels = [], []
         for pos in best_objects:
@@ -38,7 +52,7 @@ class UAVVisualization:
                 labels.append('Detection Zone')
         start, = plt.plot(best_path[0, 0], best_path[0, 1], 'g^', markersize=15, label='Start')
         handles.append(start)
-        labels.append('Start')
+        labels.append('UAV start')
         for i, pos in enumerate(best_path):
             plt.scatter(pos[0], pos[1], c='g', marker='^', alpha=0.3, s=100)
         # Highlight detection step
@@ -51,7 +65,11 @@ class UAVVisualization:
         
         plt.xlabel("X")
         plt.ylabel("Y")
-        noise_text = f" (Noise Std: {self.noise_std})" if self.noise_std is not None else ""
+        plt.xlim(self.map_bounds_low[0], self.map_bounds_high[0])
+        plt.ylim(self.map_bounds_low[1], self.map_bounds_high[1])
+        noise_text = (f" (Pos Std: {self.noise_std[0]}m, Bearing Std: {self.noise_std[1]}°)"
+                      if isinstance(self.noise_std, tuple) else
+                      f" (Noise Std: {self.noise_std})")
         plt.title(f"Best Episode Trajectory with Steps and Detection{noise_text}")
         plt.legend(handles, labels)
         plt.grid(True)
@@ -67,7 +85,11 @@ class UAVVisualization:
         plt.plot(0.0, 0.0, 'g^', markersize=15, label='UAV Start')
         plt.xlabel("X")
         plt.ylabel("Y")
-        noise_text = f" (Noise Std: {self.noise_std})" if self.noise_std is not None else ""
+        plt.xlim(self.map_bounds_low[0], self.map_bounds_high[0])
+        plt.ylim(self.map_bounds_low[1], self.map_bounds_high[1])
+        noise_text = (f" (Pos Std: {self.noise_std[0]}m, Bearing Std: {self.noise_std[1]}°)"
+                      if isinstance(self.noise_std, tuple) else
+                      f" (Noise Std: {self.noise_std})")
         plt.title(f"All UAV Trajectories Across Evaluation Episodes{noise_text}")
         plt.legend()
         plt.grid(True)
@@ -85,7 +107,9 @@ class UAVVisualization:
         plt.bar(['Detected', 'Not Detected'], [detected_count, undetected_count], color=['green', 'red'])
         plt.xlabel("Detection Status")
         plt.ylabel("Number of Episodes")
-        noise_text = f" (Noise Std: {self.noise_std})" if self.noise_std is not None else ""
+        noise_text = (f" (Pos Std: {self.noise_std[0]}m, Bearing Std: {self.noise_std[1]}°)"
+                      if isinstance(self.noise_std, tuple) else
+                      f" (Noise Std: {self.noise_std})")
         plt.title(f"Episodes with and without Object Detection{noise_text}")
         plt.savefig(os.path.join(self.output_dir, "detection_episodes.png"))
         plt.close()
@@ -95,7 +119,7 @@ class UAVVisualization:
         for idx, (detected, path, step_rewards) in enumerate(zip(detected_list, paths, step_rewards_list)):
             if detected == 1:
                 for i, reward in enumerate(step_rewards):
-                    if reward >= eval_env.step_penalty:
+                    if reward >= eval_env.detection_reward:
                         steps_to_detect.append(i + 1)
                         break
         
@@ -104,7 +128,9 @@ class UAVVisualization:
             plt.hist(steps_to_detect, bins=15, color='orange', alpha=0.7)
             plt.xlabel("Steps to Detect Object")
             plt.ylabel("Number of Episodes")
-            noise_text = f" (Noise Std: {self.noise_std})" if self.noise_std is not None else ""
+            noise_text = (f" (Pos Std: {self.noise_std[0]}m, Bearing Std: {self.noise_std[1]}°)"
+                          if isinstance(self.noise_std, tuple) else
+                          f" (Noise Std: {self.noise_std})")
             plt.title(f"Steps Required to Detect Object{noise_text}")
             plt.grid(True)
             plt.savefig(os.path.join(self.output_dir, "steps_to_detect_object.png"))
@@ -114,8 +140,8 @@ class UAVVisualization:
         if not total_rewards:
             return
         best_objects = object_positions_list[max_reward_index]
-        x = np.linspace(-1, 1, 25)
-        y = np.linspace(-1, 1, 25)
+        x = np.linspace(self.map_bounds_low[0], self.map_bounds_high[0], 25)
+        y = np.linspace(self.map_bounds_low[1], self.map_bounds_high[1], 25)
         X, Y = np.meshgrid(x, y)
         U, V = np.zeros_like(X), np.zeros_like(Y)
         for i in range(X.shape[0]):
@@ -124,17 +150,20 @@ class UAVVisualization:
                     rel_pos = best_objects[0] - np.array([X[i, j], Y[i, j]])
                     dist = np.linalg.norm(rel_pos)
                     angle = np.arctan2(rel_pos[1], rel_pos[0]) if dist > 1e-6 else 0.0
-                    obs = np.array([X[i, j], Y[i, j], np.sin(angle), np.cos(angle)], dtype=np.float32)
-                    noise = np.random.normal(0, eval_env.noise_std, obs.shape)
-                    obs = obs + noise
-                    direction = obs[2:4]
+                    noisy_angle = angle + np.random.normal(0, eval_env.bearing_noise_std)
+                    obs = np.array([X[i, j], Y[i, j], np.sin(noisy_angle), np.cos(noisy_angle)], dtype=np.float32)
+                    noise = np.zeros_like(obs)
+                    noise[:2] = np.random.normal(0, eval_env.position_noise_std, 2)
+                    noisy_obs = obs + noise
+                    direction = noisy_obs[2:4]
                     norm = np.linalg.norm(direction)
                     if norm > 1e-6:
-                        obs[2:4] = direction / norm
+                        noisy_obs[2:4] = direction / norm
+                    obs = noisy_obs
                 elif isinstance(eval_env, NoisyFullInfoUAVEnv):
                     obs = np.array([X[i, j], Y[i, j], best_objects[0][0], best_objects[0][1]], dtype=np.float32)
                     noise = np.random.normal(0, eval_env.noise_std, obs.shape)
-                    obs = np.clip(obs + noise, -1.0, 1.0)  # Apply clipping
+                    obs = np.clip(obs, self.map_bounds_low, self.map_bounds_high)  # Apply clipping
                 else:
                     raise ValueError("Unsupported environment type for policy visualization")
                 action, _ = model.predict(obs, deterministic=True)
@@ -144,13 +173,17 @@ class UAVVisualization:
         plt.quiver(X, Y, U, V, scale=None, scale_units='xy', width=0.003)
         plt.plot(best_objects[0][0], best_objects[0][1], 'ro', markersize=10, label='Object')
         plt.legend()
-        noise_text = f" (Noise Std: {self.noise_std})" if self.noise_std is not None else ""
+        plt.xlim(self.map_bounds_low[0], self.map_bounds_high[0])
+        plt.ylim(self.map_bounds_low[1], self.map_bounds_high[1])
+        noise_text = (f" (Pos Std: {self.noise_std[0]}m, Bearing Std: {self.noise_std[1]}°)"
+                      if isinstance(self.noise_std, tuple) else
+                      f" (Noise Std: {self.noise_std})")
         plt.title(f"Policy Vector Field{noise_text}")
         plt.xlabel("X")
         plt.ylabel("Y")
         plt.axis('equal')
         plt.grid(True)
-        plt.savefig(os.path.join(self.output_dir, f"uav_policy_noise_{self.noise_std}.png"))
+        plt.savefig(os.path.join(self.output_dir, f"uav_policy_noise_{self.noise_std[0]}_{self.noise_std[1]}.png"))
         plt.close()
 
     def move_figures_to_tensorboard(self, model):
@@ -172,63 +205,77 @@ class ComparisonVisualizer:
     
     def __init__(self, output_dir="_comparison_plots"):
         self.output_dir = output_dir
+        # Load map bounds from config
+        env_config = load_config('env_config')['environment']
+        self.map_bounds_low = np.array(env_config['map_bounds']['low'], dtype=np.float32)
+        self.map_bounds_high = np.array(env_config['map_bounds']['high'], dtype=np.float32)
         os.makedirs(output_dir, exist_ok=True)
     
-    def plot_performance_comparison(self, results_dict):
-        """
-        Plot performance comparison across scenarios and algorithms.
+    def plot_performance_comparison(self, results_dict, metric_name, title, scenarios, algorithms, single_algo=False):
+        """Plot a single metric comparison across scenarios and algorithms."""
+        plt.figure(figsize=(8, 5))
+        if single_algo:
+            values = [results_dict[scenario][metric_name] for scenario in scenarios]
+            plt.bar(scenarios, values, color=['blue', 'orange', 'green'])
+            plt.title(f'{title} (Single Algorithm: PPO)')
+        else:
+            for algo in algorithms:
+                values = [results_dict[scenario][algo][metric_name] for scenario in scenarios if algo in results_dict[scenario]]
+                plt.plot(scenarios, values, marker='o', label=algo)
+            plt.title(title)
+            plt.legend()
         
-        Args:
-            results_dict: Dictionary with structure {scenario: {algorithm: metrics}}
-        """
-        scenarios = list(results_dict.keys())
-        algorithms = list(results_dict[scenarios[0]].keys()) if scenarios else []
-        
-        if not algorithms or not scenarios:
-            raise ValueError(f"Cannot generate performance comparison plot: empty scenarios or algorithms (scenarios={scenarios}, algorithms={algorithms})")
-        
-        # Create subplots for different metrics
-        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-        fig.suptitle('Performance Comparison Across Scenarios and Algorithms', fontsize=16)
-        
-        # Success Rate Comparison
-        self._plot_metric_comparison(axes[0, 0], results_dict, 'success_rate', 
-                                   'Success Rate', scenarios, algorithms)
-        
-        # Average Reward Comparison
-        self._plot_metric_comparison(axes[0, 1], results_dict, 'avg_reward', 
-                                   'Average Reward', scenarios, algorithms)
-        
-        # Average Steps to Detect Comparison
-        self._plot_metric_comparison(axes[1, 0], results_dict, 'avg_steps_to_detect', 
-                                   'Average Steps to Detect', scenarios, algorithms)
-        
-        # Coverage Efficiency Comparison
-        self._plot_metric_comparison(axes[1, 1], results_dict, 'coverage_efficiency', 
-                                   'Coverage Efficiency', scenarios, algorithms)
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.output_dir, 'performance_comparison.png'), 
-                   dpi=300, bbox_inches='tight')
+        plt.xlabel('Noise Levels')
+        plt.ylabel(title)
+        plt.grid(True)
+        plt.savefig(os.path.join(self.output_dir, f"{metric_name}_comparison.png"), dpi=300)
         plt.close()
-    
-    def _plot_metric_comparison(self, ax, results_dict, metric_name, title, scenarios, algorithms):
-        """Helper function to plot a specific metric comparison."""
-        x = np.arange(len(scenarios))
-        width = 0.35
+
+    def plot_detection_rate_vs_noise(self, results_dict, noise_levels, scenario_name):
+        """Plot detection rate (success rate) as a function of position and bearing noise levels."""
+        plt.figure(figsize=(8, 5))
+        position_noise_values = [noise_levels['position_noise_levels'][level] for level in noise_levels['position_noise_levels']]
+        bearing_noise_values = [noise_levels['bearing_noise_levels'][level] for level in noise_levels['bearing_noise_levels']]
+        success_rates = [results_dict[level]['success_rate'] for level in noise_levels['position_noise_levels']]
         
-        for i, algo in enumerate(algorithms):
-            values = [results_dict[scenario][algo][metric_name] for scenario in scenarios]
-            ax.bar(x + i * width, values, width, label=algo, alpha=0.8)
+        # Plot detection rate vs position noise, with bearing noise as labels
+        plt.plot(position_noise_values, success_rates, marker='o', color='blue', label='Detection Rate')
+        # for i, (pos_noise, bearing_noise, success_rate) in enumerate(zip(position_noise_values, bearing_noise_values, success_rates)):
+        #     plt.annotate(f"Bearing: {bearing_noise}°", (pos_noise, success_rate), xytext=(5, 5), textcoords='offset points')
         
-        ax.set_xlabel('Scenarios')
-        ax.set_ylabel(title)
-        ax.set_title(title)
-        ax.set_xticks(x + width / 2)
-        ax.set_xticklabels(scenarios, rotation=45, ha='right')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-    
+        plt.xlabel('Noise Standard Deviation for Position (m) and Brearing (°)')
+        plt.ylabel('Detection Rate')
+        plt.title(f'Detection Rate vs. Noise Levels for {scenario_name}')
+        plt.grid(True)
+        plt.legend()
+        plt.savefig(os.path.join(self.output_dir, 'detection_rate_vs_noise.png'), dpi=300)
+        plt.close()
+
+    def generate_all_comparisons(self, results_dict, scenario_name, single_algo=False):
+        """Generate comparison plots for all metrics across scenarios."""
+        scenarios = list(results_dict.keys())
+        algorithms = ["PPO"] if single_algo else list({algo for scenario in results_dict.values() for algo in scenario.keys() if isinstance(scenario, dict)})
+        
+        # Define metrics to compare
+        metrics = [
+            ('success_rate', 'Success Rate'),
+            ('avg_reward', 'Average Reward'),
+            ('avg_steps_to_detect', 'Average Steps to Detect'),
+            ('coverage_efficiency', 'Coverage Efficiency')
+        ]
+        
+        # Generate individual comparison plots for each metric
+        for metric_name, title in metrics:
+            self.plot_performance_comparison(results_dict, metric_name, title, scenarios, algorithms, single_algo)
+        
+        # Generate detection rate vs. noise level plot
+        training_config = load_config('training_config')['training']
+        noise_levels = {
+            'position_noise_levels': training_config['position_noise_levels'],
+            'bearing_noise_levels': training_config['bearing_noise_levels']
+        }
+        self.plot_detection_rate_vs_noise(results_dict, noise_levels, scenario_name)
+
     def plot_reward_distribution(self, results_dict):
         """Plot reward distribution comparison."""
         scenarios = list(results_dict.keys())
@@ -351,9 +398,9 @@ class ComparisonVisualizer:
                 
                 for path in paths:
                     for pos in path:
-                        # Convert from [-1, 1] to [0, 49]
-                        x_idx = int((pos[0] + 1) * 24.5)
-                        y_idx = int((pos[1] + 1) * 24.5)
+                        # Convert from map_bounds to [0, 49]
+                        x_idx = int((pos[0] - self.map_bounds_low[0]) * 0.95 * 50 / (self.map_bounds_high[0] - self.map_bounds_low[0]))
+                        y_idx = int((pos[1] - self.map_bounds_low[1]) * 0.95 * 50 / (self.map_bounds_high[1] - self.map_bounds_low[1]))
                         x_idx = max(0, min(49, x_idx))
                         y_idx = max(0, min(49, y_idx))
                         heatmap_data[y_idx, x_idx] += 1
@@ -421,46 +468,6 @@ class ComparisonVisualizer:
                    dpi=300, bbox_inches='tight')
         plt.close()
     
-    def generate_all_comparisons(self, results_dict, noise_category, single_algo=False):
-            """Generate comparison plots for all metrics across scenarios."""
-            plt.figure(figsize=(15, 10))
-            axes = plt.subplots(2, 2, figsize=(15, 10))[1]  # Create 2x2 grid of subplots
-            
-            scenarios = list(results_dict.keys())
-            algorithms = ["PPO"] if single_algo else list({algo for scenario in results_dict.values() for algo in scenario.keys() if isinstance(scenario, dict)})
-            
-            self.plot_performance_comparison(results_dict, axes, scenarios, algorithms, single_algo)
-            plt.tight_layout()
-            plt.savefig(os.path.join(self.output_dir, f"{noise_category}_comparison.png"))
-            plt.close()
-
-    def plot_performance_comparison(self, results_dict, axes, scenarios, algorithms, single_algo=False):
-        """Plot comparison of performance metrics across scenarios and algorithms."""
-        metrics = ['success_rate', 'avg_reward', 'avg_steps_to_detect']
-        
-        for idx, metric in enumerate(metrics):
-            ax = axes[0, idx] if idx < 2 else axes[1, 0]  # Adjust layout for 2x2 grid
-            self._plot_metric_comparison(ax, results_dict, metric, 'Success Rate' if metric == 'success_rate' else 
-                                        'Average Reward' if metric == 'avg_reward' else 'Average Steps to Detect', 
-                                        scenarios, algorithms, single_algo)
-
-    def _plot_metric_comparison(self, ax, results_dict, metric_name, title, scenarios, algorithms, single_algo=False):
-        """Plot a single metric comparison across scenarios and algorithms."""
-        if single_algo:
-            values = [results_dict[scenario][metric_name] for scenario in scenarios]
-            ax.bar(scenarios, values, color=['blue', 'orange', 'green'])
-            ax.set_title(f'{title} (Single Algorithm: PPO)')
-        else:
-            for algo in algorithms:
-                values = [results_dict[scenario][algo][metric_name] for scenario in scenarios if algo in results_dict[scenario]]
-                ax.plot(scenarios, values, marker='o', label=algo)
-            ax.set_title(title)
-            ax.legend()
-        
-        ax.set_xlabel('Scenarios')
-        ax.set_ylabel(title)
-        ax.grid(True)
-
     def move_figures_to_tensorboard(self, model):
         """
         Move all generated figures to the TensorBoard log directory.

@@ -1,15 +1,75 @@
 training:
   # Training configuration
-  max_steps: 20
-  total_timesteps: 2000000
-  eval_episodes: 100
+  max_steps: 100
+  total_timesteps: 500000
+  eval_episodes: 1000
   
-  # Noise levels (standard deviation) for different scenarios
-  noise_levels:
-    noise_low: 0.1    # Reduced from original values
-    noise_medium: 0.2
-    noise_high: 0.35
-  
+  # Noise levels for position (meters) and bearing (degrees)
+  position_noise_levels:
+    noise_l0: 0.0
+    noise_l1: 1.0
+    noise_l2: 2.0
+    noise_l3: 3.0
+    noise_l4: 4.0
+    noise_l5: 5.0
+    noise_l6: 6.0
+    noise_l7: 7.0
+    noise_l8: 8.0
+    noise_l9: 9.0
+    noise_l10: 10.0
+    noise_l11: 11.0
+    noise_l12: 12.0
+    noise_l13: 13.0
+    noise_l14: 14.0
+    noise_l15: 15.0
+    noise_l16: 16.0
+    noise_l17: 17.0
+    noise_l18: 18.0
+    noise_l19: 19.0
+    noise_l20: 20.0
+    noise_l21: 21.0
+    noise_l22: 22.0
+    noise_l23: 23.0
+    noise_l24: 24.0
+    noise_l25: 25.0
+    noise_l26: 26.0
+    noise_l27: 27.0
+    noise_l28: 28.0
+    noise_l29: 29.0
+    noise_l30: 30.0
+  bearing_noise_levels:
+    noise_l0: 0.0
+    noise_l1: 1.0
+    noise_l2: 2.0
+    noise_l3: 3.0
+    noise_l4: 4.0
+    noise_l5: 5.0
+    noise_l6: 6.0
+    noise_l7: 7.0
+    noise_l8: 8.0
+    noise_l9: 9.0
+    noise_l10: 10.0
+    noise_l11: 11.0
+    noise_l12: 12.0
+    noise_l13: 13.0
+    noise_l14: 14.0
+    noise_l15: 15.0
+    noise_l16: 16.0
+    noise_l17: 17.0
+    noise_l18: 18.0
+    noise_l19: 19.0
+    noise_l20: 20.0
+    noise_l21: 21.0
+    noise_l22: 22.0
+    noise_l23: 23.0
+    noise_l24: 24.0
+    noise_l25: 25.0
+    noise_l26: 26.0
+    noise_l27: 27.0
+    noise_l28: 28.0
+    noise_l29: 29.0
+    noise_l30: 30.0
+
   # Available scenario types
   scenarios:
     - full_info_noise

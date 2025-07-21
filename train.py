@@ -10,116 +10,6 @@ from stable_baselines3.common.env_checker import check_env
 import numpy as np
 import matplotlib.pyplot as plt
 
-def evaluate_model(model, env_class, config, scenario_name, algo_name, noise_std=None):
-    """
-    Evaluate model performance with detailed metrics.
-    
-    Args:
-        model: Trained RL model
-        env_class: Environment class to evaluate
-        config: Configuration dictionary
-        scenario_name: Name of the scenario
-        algo_name: Name of the algorithm
-        noise_std: Standard deviation of noise for the scenario (optional)
-    
-    Returns:
-        Dictionary containing evaluation metrics
-    """
-    eval_env = env_class(max_steps=config["max_steps"], render_mode=None, noise_std=noise_std if noise_std is not None else 0.1)
-    
-    metrics = {
-        'scenario': scenario_name,
-        'algorithm': algo_name,
-        'success_rate': 0,
-        'avg_steps_to_detect': 0,
-        'avg_reward': 0,
-        'std_reward': 0,
-        'coverage_efficiency': 0,
-        'detection_times': [],
-        'rewards': [],
-        'step_rewards': [],  # New: Store step-wise rewards for each episode
-        'paths': [],
-        'object_positions': [],
-        'detected_episodes': []
-    }
-    
-    successful_detections = 0
-    detection_steps = []
-    all_rewards = []
-    all_step_rewards = []
-    all_paths = []
-    all_object_positions = []
-    detected_episodes = []
-    
-    for episode in range(config["eval_episodes"]):
-        obs, _ = eval_env.reset(seed=42)
-        episode_reward = 0
-        episode_steps = 0
-        done = False
-        path = []
-        step_rewards = []
-        detected_in_episode = False
-        
-        while not done and episode_steps < config["max_steps"]:
-            action, _ = model.predict(obs,deterministic=False)
-            obs, reward, terminated, truncated, info = eval_env.step(action)
-            done = terminated or truncated
-            episode_reward += reward
-            episode_steps += 1
-            # path.append(obs[:2].copy())
-            path.append(eval_env.uav_pos.copy())
-            step_rewards.append(reward)
-            
-            # Check if detection occurred this step
-            if info.get("detected_count", 0) > 0 and not detected_in_episode:
-                detection_steps.append(episode_steps)
-                successful_detections += 1
-                detected_in_episode = True
-        
-        all_rewards.append(episode_reward)
-        all_step_rewards.append(step_rewards)
-        all_paths.append(path)
-        all_object_positions.append([pos.copy() for pos in eval_env.object_pos])
-        detected_episodes.append(detected_in_episode)
-    
-    # Calculate metrics
-    metrics['success_rate'] = successful_detections / config["eval_episodes"]
-    metrics['avg_reward'] = np.mean(all_rewards)
-    metrics['std_reward'] = np.std(all_rewards)
-    metrics['avg_steps_to_detect'] = np.mean(detection_steps) if detection_steps else config["max_steps"]
-    
-    # Calculate coverage efficiency (unique positions visited / total steps)
-    total_unique_positions = 0
-    total_steps = 0
-    for path in all_paths:
-        unique_positions = len(set(tuple(pos) for pos in path))
-        total_unique_positions += unique_positions
-        total_steps += len(path)
-    
-    metrics['coverage_efficiency'] = total_unique_positions / total_steps if total_steps > 0 else 0
-    
-    # Store detailed data for visualization
-    metrics['detection_times'] = detection_steps
-    metrics['rewards'] = all_rewards
-    metrics['step_rewards'] = all_step_rewards
-    metrics['paths'] = all_paths
-    metrics['object_positions'] = all_object_positions
-    metrics['detected_episodes'] = detected_episodes
-    
-    # Initialize UAVVisualization and generate plots
-    vis_dir = os.path.join(config["log_dir"], "figures")
-    os.makedirs(vis_dir, exist_ok=True)
-    visualizer = UAVVisualization(output_dir=vis_dir, noise_std=noise_std)
-    visualizer.plot_best_trajectory(all_paths, all_rewards, all_object_positions, all_step_rewards, eval_env)
-    visualizer.plot_all_trajectories(all_paths)
-    visualizer.plot_detection_stats(detected_episodes)
-    visualizer.plot_steps_to_detect(detected_episodes, all_paths, all_step_rewards, eval_env)
-    visualizer.plot_policy_visualization(all_rewards, all_object_positions, np.argmax(all_rewards), model, eval_env)
-    visualizer.move_figures_to_tensorboard(model)
-    
-    eval_env.close()
-    return metrics
-
 def main():
     # Load configurations
     training_config = load_config('training_config')['training']
@@ -134,13 +24,10 @@ def main():
     # Training parameters
     max_steps = training_config['max_steps']
     total_timesteps = training_config['total_timesteps']
-    eval_episodes = training_config['eval_episodes']
     
     # Noise levels from config
-    noise_levels = training_config['noise_levels']
-    
-    # Available scenarios from config
-    available_scenarios = training_config['scenarios']
+    position_noise_levels = training_config['position_noise_levels']
+    bearing_noise_levels = training_config['bearing_noise_levels']
     
     # Environment dictionary mapping
     env_dict = {
@@ -148,42 +35,56 @@ def main():
         'direction_noise': NoisyDirectionUAVEnv
     }
     
-    # Train and evaluate for each scenario
-    for scenario_name in available_scenarios:
-        if scenario_name not in env_dict:
-            print(f"Warning: Scenario {scenario_name} not found in environment dictionary")
-            continue
-            
-        env_class = env_dict[scenario_name]
+    # Train for direction noise scenario with different noise levels
+    scenario_name = 'direction_noise'
+    env_class = env_dict[scenario_name]
+    
+    for noise_level in position_noise_levels.keys():
+        position_noise_std = position_noise_levels[noise_level]
+        bearing_noise_std = bearing_noise_levels[noise_level]
+        print(f"\nTraining {scenario_name} with {noise_level} (position std: {position_noise_std}m, bearing std: {bearing_noise_std}°)")
         
-        # Create environment with noise levels from config
+        # Validate noise parameters
+        if not isinstance(position_noise_std, (int, float)):
+            raise TypeError(f"position_noise_std must be a float or int, got {type(position_noise_std)}: {position_noise_std}")
+        if not isinstance(bearing_noise_std, (int, float)):
+            raise TypeError(f"bearing_noise_std must be a float or int, got {type(bearing_noise_std)}: {bearing_noise_std}")
+        
+        # Create environment with current noise levels
         env = env_class(max_steps=max_steps, render_mode=None,
-                       noise_std=noise_levels['noise_medium'])
+                        position_noise_std=position_noise_std,
+                        bearing_noise_std=bearing_noise_std)
                        
         # Create and train the model
         model = RLAlgorithmFactory.create_algorithm(
             "PPO",
             env,
-            tensorboard_log=tensorboard_log
+            tensorboard_log=os.path.join(tensorboard_log, f"{noise_level}")
         )
         
         model.learn(total_timesteps=total_timesteps, progress_bar=True)
         
+        # Create a directory for the model and configs
+        save_dir = os.path.join(tensorboard_log, f"{scenario_name}_{noise_level}")
+        os.makedirs(save_dir, exist_ok=True)
+        
         # Save the model
-        model_path = os.path.join(tensorboard_log, f"{scenario_name}_model")
+        model_path = os.path.join(save_dir, "model")
         model.save(model_path)
         
-        # Evaluate the model
-        # metrics = evaluate_model(
-        #     model,
-        #     env_class,
-        #     {"max_steps": max_steps, "eval_episodes": eval_episodes, "log_dir": tensorboard_log},
-        #     scenario_name,
-        #     "PPO",
-        #     noise_std=noise_levels['noise_medium']
-        # )
+        # Copy configuration files
+        import shutil
+        config_dir = os.path.join(save_dir, "config")
+        os.makedirs(config_dir, exist_ok=True)
         
-        # Visualization code here...
+        # Copy all config files
+        config_files = ['agent_config.yaml', 'env_config.yaml', 'training_config.yaml']
+        for config_file in config_files:
+            src = os.path.join('config', config_file)
+            dst = os.path.join(config_dir, config_file)
+            shutil.copy2(src, dst)
+            
+        print(f"Saved model and configurations to {save_dir}")
 
 if __name__ == "__main__":
     main()
